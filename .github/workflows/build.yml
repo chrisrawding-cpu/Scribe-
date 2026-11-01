@@ -53,7 +53,11 @@ jobs:
           APK=app/build/outputs/apk/release/app-release.apk
           mkdir -p dist
           cp "$APK" dist/Scribe.apk
-          keytool -printcert -jarfile dist/Scribe.apk | tee dist/signing-cert.txt
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$APKSIGNER" verify --print-certs dist/Scribe.apk | tee dist/signing-cert.txt
+          SHA1=$(grep -m1 "SHA-1 digest" dist/signing-cert.txt | awk '{print $NF}' | sed 's/../&:/g; s/:$//' | tr a-f A-F)
+          echo "SHA-1 for your Android OAuth client: $SHA1" | tee -a dist/signing-cert.txt
+          echo "### Signing SHA-1: \`$SHA1\`" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
