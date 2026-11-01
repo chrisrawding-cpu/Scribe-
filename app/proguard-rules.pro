@@ -1,0 +1,3 @@
+-keepattributes *Annotation*, InnerClasses
+-keep,includedescriptorclasses class com.scribe.app.**$$serializer { *; }
+-keepclassmembers class com.scribe.app.** { *** Companion; }

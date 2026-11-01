@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Scribe</string>
+    <string name="tile_label">Scribe record</string>
+    <string name="shortcut_record">Start recording</string>
+</resources>
