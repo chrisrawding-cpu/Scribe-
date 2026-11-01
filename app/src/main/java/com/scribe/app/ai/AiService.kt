@@ -18,6 +18,7 @@ import com.scribe.app.util.AppJson
 import com.scribe.app.util.formatClock
 import com.scribe.app.util.formatDateTime
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlin.math.ceil
 
 class AiService(private val vertex: Vertex, private val settings: SettingsStore) {
