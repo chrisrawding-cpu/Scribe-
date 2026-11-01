@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.android.gms.common.api.ApiException
 import com.scribe.app.BuildConfig
 import com.scribe.app.cloud.NeedsSignInException
 import com.scribe.app.data.AppSettings
@@ -93,12 +94,21 @@ fun SettingsScreen(onTemplates: () -> Unit) {
 
     fun set(block: (AppSettings) -> AppSettings) = c.settings.update(block)
 
+    var signInHelp by remember { mutableStateOf("") }
     val authLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
-        if (res.resultCode == Activity.RESULT_OK) {
-            runCatching { c.auth.resultFromIntent(res.data) }
-                .onSuccess { c.auth.onAuthorized(it); ctx.toast("Signed in") }
-                .onFailure { ctx.toast("Sign-in failed: ${it.message}") }
-        } else ctx.toast("Sign-in cancelled")
+        // Google returns its real error code inside the result intent even when the resultCode is CANCELED,
+        // so always try to decode it rather than assuming the user backed out.
+        try {
+            val r = c.auth.resultFromIntent(res.data)
+            c.auth.onAuthorized(r)
+            signInHelp = ""
+            ctx.toast("Signed in")
+        } catch (e: ApiException) {
+            signInHelp = explainSignInError(e.statusCode, ctx.packageName, sha1)
+        } catch (e: Exception) {
+            signInHelp = if (res.resultCode != Activity.RESULT_OK) explainSignInError(-1, ctx.packageName, sha1)
+            else "Sign-in failed: ${e.message}"
+        }
     }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) runCatching {
@@ -116,8 +126,10 @@ fun SettingsScreen(onTemplates: () -> Unit) {
             } else {
                 c.auth.onAuthorized(r); ctx.toast("Signed in")
             }
+        } catch (e: ApiException) {
+            signInHelp = explainSignInError(e.statusCode, ctx.packageName, sha1)
         } catch (e: Exception) {
-            testLog = "Sign-in failed: ${e.message}\n\nIf this says DEVELOPER_ERROR (10), create an Android OAuth client in your Cloud project for package ${ctx.packageName} with SHA-1 $sha1 (see below)."
+            signInHelp = "Sign-in failed: ${e.message}\n\n" + explainSignInError(10, ctx.packageName, sha1)
         }
     }
 
@@ -191,6 +203,12 @@ fun SettingsScreen(onTemplates: () -> Unit) {
                         Button(onClick = { signIn() }) { Text(if (s.accountEmail.isBlank()) "Sign in with Google" else "Switch account") }
                         if (s.accountEmail.isNotBlank()) OutlinedButton(onClick = { c.auth.signOut() }) { Text("Sign out") }
                     }
+                    if (signInHelp.isNotBlank()) {
+                        SelectionContainer { Text(signInHelp, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    }
+                    Text("This phone's copy of Scribe is signed with:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    CopyRow("SHA-1 (must match your Android OAuth client)", sha1, ctx)
+                    CopyRow("Package name", ctx.packageName, ctx)
                 } else {
                     Text(if (s.serviceAccountEmail.isNotBlank()) "Using ${s.serviceAccountEmail}" else "No key imported", style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -258,6 +276,26 @@ fun SettingsScreen(onTemplates: () -> Unit) {
             }
             Spacer(Modifier.size(24.dp))
         }
+    }
+}
+
+/** Turns Google Play services status codes into actionable setup advice. */
+fun explainSignInError(code: Int, pkg: String, sha1: String): String {
+    val setup = """
+Fix in Google Cloud console → APIs & Services, in the SAME project as your bucket:
+1. Credentials → Create credentials → OAuth client ID → type "Android"
+   Package name: $pkg
+   SHA-1: $sha1
+   (If one already exists with a different SHA-1, edit it or add another — the SHA-1 changes if you install a build signed with a different key.)
+2. OAuth consent screen (Google Auth Platform → Branding/Audience): set up, User type "Internal" for a Workspace org (or add yourself as a test user if External), and add the scope …/auth/cloud-platform under Data access.
+3. Wait ~5 minutes after saving, then tap Sign in again.""".trimIndent()
+    return when (code) {
+        10 -> "Google rejected the app (DEVELOPER_ERROR 10): no Android OAuth client matches this app's package + SHA-1.\n\n$setup"
+        16 -> "Sign-in was closed before finishing (CANCELED 16). If you didn't close it yourself, Google most likely rejected the app's signature.\n\n$setup"
+        7 -> "Network error (7) — check your connection and try again."
+        8 -> "Google Play services internal error (8) — update Google Play services and try again."
+        -1 -> "Google closed the sign-in screen without saying why. This almost always means the app's SHA-1/package isn't registered as an Android OAuth client, or the consent screen isn't set up.\n\n$setup"
+        else -> "Sign-in failed (Google status $code).\n\n$setup"
     }
 }
 
